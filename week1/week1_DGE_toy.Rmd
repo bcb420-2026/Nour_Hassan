@@ -1,0 +1,38 @@
+---
+title: "Week 1 Homework"
+output: html_notebook
+---
+
+Generate matrix 
+
+```{r}
+set.seed(123)
+
+toy_matrix <- matrix(rnbinom(n=50, 1, p=0.01), nrow=5, ncol=10)
+
+#label matrix 
+
+colnames(toy_matrix) <- c("cond1", "cond2", "cond3", "cond4", "cond5", "ctrl1", 
+                          "ctrl2", "ctrl3", "ctrl4", "ctrl5")
+
+rownames(toy_matrix) <- c("gene1", "gene2", "gene3", "gene4", "gene5")
+
+toy_matrix
+```
+
+Generate Fold Change
+
+```{r}
+cond_mean <- rowMeans(toy_matrix[, 1:5])
+ctrl_mean <- rowMeans(toy_matrix[, 6:10])
+
+fold_change <- cond_mean / ctrl_mean
+
+fold_change <- unname(fold_change) #keep them unlabelled
+
+results <- data.frame(gene =  c("gene1", "gene2", "gene3", "gene4", "gene5"), 
+                      fold_change = fold_change)
+
+results 
+```
+
