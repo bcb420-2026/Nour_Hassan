@@ -1,0 +1,265 @@
+---
+title: "GEO_exploration"
+output: html_document
+date: "2026-01-27"
+---
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+if (!requireNamespace("GEOmetadb", quietly = TRUE))
+  BiocManager::install("GEOmetadb")
+if (!requireNamespace("DBI", quietly = TRUE))
+  install.packages("DBI")
+if (!requireNamespace("RSQLite", quietly = TRUE))
+  install.packages("RSQLite")
+if (!requireNamespace("dplyr", quietly = TRUE))
+  install.packages("dplyr")
+if (!requireNamespace("ggplot2", quietly = TRUE))
+  install.packages("ggplot2")
+```
+
+```{r}
+library(GEOmetadb)
+
+if (!file.exists('GEOmetadb.sqlite')) getSQLiteFile()
+file.info('GEOmetadb.sqlite')
+```
+```{r}
+library(DBI)
+library(RSQLite)
+con <- dbConnect(SQLite(), 'GEOmetadb.sqlite')
+
+dbListTables(con)
+dbListFields(con, 'gse')
+```
+```{r}
+num_platforms <- dbGetQuery(con, 'select count(*) as n from gpl')
+num_platforms
+uniq_tech <- dbGetQuery(con, 'select distinct technology from gpl')
+NROW(uniq_tech)
+```
+
+```{r}
+num_uniq_tech <- dbGetQuery(con, 'select technology, count(*) as Num_Platforms from gpl group by technology')
+# Quick plot
+library(ggplot2)
+plot_df <- subset(num_uniq_tech, !is.na(technology))
+ ggplot(plot_df, aes(x = technology, y = Num_Platforms)) +
+   geom_col() + coord_flip()
+```
+Restrict to human 
+```{r}
+num_uniq_tech_human <- dbGetQuery(con, "select technology, count(*) as Num_Platforms from gpl where organism = 'Homo sapiens' group by technology order by Num_Platforms desc")
+num_uniq_tech_contain_human <- dbGetQuery(con, "select technology, count(*) as Num_Platforms from gpl where organism like '%Homo sapiens%' group by technology order by Num_Platforms desc")
+
+library(dplyr)
+uniq_tech_all <- bind_rows(
+  transform(num_uniq_tech_human, type = 'human only'),
+  transform(num_uniq_tech_contain_human, type = 'contains human'),
+  transform(num_uniq_tech, type = 'All species')
+)
+
+ggplot(uniq_tech_all, aes(technology, Num_Platforms, fill = type)) +
+  geom_col(position = 'dodge') + coord_flip() +
+  theme(legend.position = 'bottom') +
+  ggtitle('Platforms that contain human vs human only')
+```
+```{r}
+sql <- paste(
+  "SELECT DISTINCT gse.title, gse.gse, gpl.title",
+  "FROM gse JOIN gse_gpl ON gse_gpl.gse = gse.gse",
+  "JOIN gpl ON gse_gpl.gpl = gpl.gpl",
+  "WHERE gpl.technology = 'high-throughput sequencing'"
+)
+rs <- dbGetQuery(con, sql)
+dim(rs)
+
+sql <- paste(
+  "SELECT DISTINCT gse.title, gse.gse, gpl.title, gse.submission_date",
+  "FROM gse JOIN gse_gpl ON gse_gpl.gse = gse.gse",
+  "JOIN gpl ON gse_gpl.gpl = gpl.gpl",
+  "WHERE gse.submission_date > '2022-01-01' AND",
+  "gse.title LIKE '%ovarian%' AND",
+  "gpl.organism LIKE '%Homo sapiens%' AND",
+  "gpl.technology LIKE '%high-throughput seq%'"
+)
+rs <- dbGetQuery(con, sql)
+dim(rs)
+head(rs[, c('gse','title')])
+```
+```{r}
+sql <- paste(
+  "SELECT DISTINCT gse.title, gse.gse, gpl.title, gse.submission_date",
+  "FROM gse JOIN gse_gpl ON gse_gpl.gse = gse.gse",
+  "JOIN gpl ON gse_gpl.gpl = gpl.gpl",
+  "WHERE gse.submission_date > '2022-01-01' AND",
+  "gpl.organism LIKE '%Homo sapiens%' AND",
+  "gpl.technology LIKE '%high-throughput seq%'"
+)
+rs <- dbGetQuery(con, sql)
+dim(rs)
+```
+
+```{r}
+sql <- paste(
+  "SELECT DISTINCT gse.title, gse.gse, gpl.title, gse.submission_date, gse.supplementary_file",
+  "FROM gse JOIN gse_gpl ON gse_gpl.gse = gse.gse",
+  "JOIN gpl ON gse_gpl.gpl = gpl.gpl",
+  "WHERE gse.submission_date > '2022-01-01' AND",
+  "gse.title LIKE '%ovarian%' AND",
+  "gpl.organism LIKE '%Homo sapiens%' AND",
+  "gpl.technology LIKE '%high-throughput sequencing%'",
+  "ORDER BY gse.submission_date DESC"
+)
+rs <- dbGetQuery(con, sql)
+counts_files <- rs$supplementary_file[grep("count|cnt", rs$supplementary_file, ignore.case = TRUE)]
+series_of_interest <- rs$gse[grep("count|cnt", rs$supplementary_file, ignore.case = TRUE)]
+# Preview filenames
+shortened <- unlist(lapply(counts_files, function(x){
+  x <- unlist(strsplit(x, ";"))
+  x <- x[grep("count|cnt|txt|csv|xlsx", x, ignore.case = TRUE)]
+  tail(unlist(strsplit(x, "/")), n = 1)
+}))
+head(shortened, 10)
+```
+```{r}
+num_series <- dbGetQuery(con, paste(
+  "select * from gsm where series_id in ('",
+  paste(series_of_interest, collapse = "','"), "')", sep = ""))
+
+gse.count <- as.data.frame(table(num_series$series_id))
+subset(gse.count, Freq > 6)
+```
+
+
+Inspecting “GSE201427”
+```{r}
+dbGetQuery(con, "
+  SELECT gse, type
+  FROM gse
+  WHERE gse = 'GSE201427';
+")
+
+
+dbGetQuery(con, "
+  SELECT title, summary
+  FROM gse
+  WHERE gse = 'GSE201427';
+")
+
+
+dbGetQuery(con, "
+SELECT COUNT(DISTINCT gsm) AS num_samples
+FROM gse_gsm
+WHERE gse = 'GSE201427';
+")
+
+dbGetQuery(con, "
+SELECT gsm, title, source_name_ch1, characteristics_ch1
+FROM gse_gsm
+JOIN gsm USING (gsm)
+WHERE gse = 'GSE201427'
+LIMIT 10;
+")
+
+
+```
+“GSE166530”
+```{r}
+dbGetQuery(con, "
+  SELECT gse,
+  FROM gse
+  WHERE gse = 'GSE166530';
+")
+
+dbGetQuery(con, "
+SELECT COUNT(DISTINCT gsm) AS num_samples
+FROM gse_gsm
+WHERE gse = 'GSE166530';
+")
+
+dbGetQuery(con, "
+SELECT gsm, title, source_name_ch1, characteristics_ch1
+FROM gse_gsm
+JOIN gsm USING (gsm)
+WHERE gse = 'GSE166530'
+")
+
+
+```
+GSE162183
+```{r}
+dbGetQuery(con, "
+  SELECT gse, type, overall_design
+  FROM gse
+  WHERE gse = 'GSE162183';
+")
+
+
+dbGetQuery(con, "
+  SELECT title, summary
+  FROM gse
+  WHERE gse = 'GSE162183';
+")
+
+
+dbGetQuery(con, "
+SELECT COUNT(DISTINCT gsm) AS num_samples
+FROM gse_gsm
+WHERE gse = 'GSE162183';
+")
+
+dbGetQuery(con, "
+SELECT gsm, title, source_name_ch1, characteristics_ch1
+FROM gse_gsm
+JOIN gsm USING (gsm)
+WHERE gse = 'GSE162183'
+")
+
+dbGetQuery(con, "
+  SELECT gsm
+  FROM gse_gsm
+  WHERE gse = 'GSE162183';
+")
+
+
+```
+GSE186458
+```{r}
+dbGetQuery(con, "
+  SELECT gse, type, overall_design
+  FROM gse
+  WHERE gse = 'GSE186458';
+")
+
+
+dbGetQuery(con, "
+  SELECT title, summary
+  FROM gse
+  WHERE gse = 'GSE186458';
+")
+
+
+dbGetQuery(con, "
+SELECT COUNT(DISTINCT gsm) AS num_samples
+FROM gse_gsm
+WHERE gse = 'GSE186458';
+")
+
+dbGetQuery(con, "
+SELECT gsm, title, source_name_ch1, characteristics_ch1
+FROM gse_gsm
+JOIN gsm USING (gsm)
+WHERE gse = 'GSE186458'
+")
+
+```
+```{r}
+dbGetQuery(con, "
+  SELECT gse
+  FROM gse
+  WHERE gse = 'GSE264108';
+")
+```
+
