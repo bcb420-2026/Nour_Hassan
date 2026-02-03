@@ -1,0 +1,12 @@
+Course_Department,Course_Code,Year,course_type
+BIO,130,1,BSc Requirement
+BIO,120,1,Pre-requisite 
+CHM,135,1,BSc Requirement 
+CHM,136,1,BSc Requirement
+PSY,100,1,Electives
+CSC,108,1,BSc Requirement
+CSC,148,1,BSc Requirement
+PHY,131,1,Electives,
+MAT,135,1,BSc Requirement
+MAT,136,1,BSc Requirement
+
