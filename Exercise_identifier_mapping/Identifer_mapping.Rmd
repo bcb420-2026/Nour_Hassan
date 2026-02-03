@@ -1,0 +1,147 @@
+---
+title: "Identifer mapping"
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+#Load Geo dataset 
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+library(GEOquery)
+
+fetch_geo_supp <- function(gse, destdir = "data") {
+  dir.create(destdir, showWarnings = FALSE, recursive = TRUE)
+  GEOquery::getGEOSuppFiles(GEO = gse, baseDir = destdir, makeDirectory = TRUE)
+  invisible(file.path(destdir, gse))
+}
+
+fetch_geo_supp(gse = "GSE233947")
+fetch_geo_supp(gse = "GSE119732")
+```
+# Biomart 
+```{r}
+library(biomaRt)
+listMarts() 
+```
+```{r}
+listEnsemblArchives()[1:10,]
+# Example: pin to Ensembl 114
+ensembl <- useEnsembl(biomart = "ensembl",version = 114)
+
+#do not pin 
+
+ensembl <- useMart("ensembl")
+```
+```{r}
+datasets <- listDatasets(ensembl)
+
+# filter for human
+human <- datasets[grep(datasets$dataset, pattern = "hsapiens"), ]
+human
+ensembl <- useDataset("hsapiens_gene_ensembl", mart = ensembl)
+
+```
+# fimding filters and attributes 
+```{r}
+all_filters <- listFilters(ensembl)
+dim(all_filters)
+# search for Ensembl gene filters
+all_filters[grep(all_filters$name, pattern = "ensembl_gene"), ] #ensembl_gene ids 
+all_attr <- listAttributes(ensembl)
+all_attr[1:10,]
+# search for HGNC
+searchAttributes(ensembl, "hgnc") # common attributes: ensembl_gene_id hgnc_symbol
+```
+# Strip suffix
+```{r}
+strip_ensembl_version <- function(x) sub("\\..*$", "", x)
+ids <- c("ENSG00000141510.17", "ENSG00000157764.2")
+ids_clean <- strip_ensembl_version(ids)
+ids_clean
+```
+```{r}
+map <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters = "ensembl_gene_id",
+  values = ids_clean,
+  mart = ensembl
+)
+map
+```
+#Cacheing 
+```{r}
+cache_file <- "id_conversion.rds"
+
+if (file.exists(cache_file)) {
+  map <- readRDS(cache_file)
+} else {
+  map <- getBM(
+    attributes = c("ensembl_gene_id", "hgnc_symbol"),
+    filters = "ensembl_gene_id",
+    values = ids_clean,
+    mart = ensembl
+  )
+  saveRDS(map, cache_file)
+}
+```
+
+Exercise 1
+
+```{r}
+library(dplyr)
+library(data.table)
+fetch_geo_supp(gse = "GSE119732")
+counts <- fread(
+  "data/GSE119732/GSE119732_count_table_RNA_seq.txt.gz"
+)
+first_20 <- counts[1:20,]
+num_prefix <- sum(grepl("\\.", first_20$gene_id))
+num_prefix
+
+counts$version_stripped <- strip_ensembl_version(counts$gene_id)
+
+map <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters = "ensembl_gene_id",
+  values = counts$version_stripped,
+  mart = ensembl
+)
+map[1:10,]
+```
+# Exercise 2
+```{r}
+library(data.table)
+library(dplyr)
+library(biomaRt)
+
+# Load file properly
+counts <- fread("data/GSE122380/GSE122380_raw_counts.txt.gz")
+
+# First column = gene IDs
+colnames(counts)[1] <- "Gene_id"
+
+# Strip versions (if any)
+strip_ensembl_version <- function(x) sub("\\..*$", "", x)
+counts$ensembl_gene_id <- strip_ensembl_version(counts$Gene_id)
+
+# Optional: check first few
+head(counts)
+ensembl <- useEnsembl(
+  biomart = "ensembl",
+  dataset = "hsapiens_gene_ensembl"
+)
+map <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters = "ensembl_gene_id",
+  values = counts$ensembl_gene_id,
+  mart = ensembl
+)
+
+# Merge back
+counts <- counts %>%
+  left_join(map, by = "ensembl_gene_id")
+
+```
+
