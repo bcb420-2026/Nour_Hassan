@@ -1,0 +1,463 @@
+---
+title: "normalization_exercise"
+output: html_document
+---
+
+```{r}
+library(GEOquery)
+library(knitr)
+library(dplyr)
+library(tibble)
+if(!require(tidyverse)){
+  install.packages("tidyvers",dependencies = FALSE)
+}
+library(tidyverse)
+
+gse <- "GSE119732"
+
+source("./supp_functions.R")
+fetch_geo_supp(gse = gse)
+
+path <- file.path("data", gse)
+files <- list.files(path, pattern = "\\.txt.gz$|\\.tsv.gz$|\\.csv.gz$", 
+                    full.names = TRUE, recursive = TRUE)
+```
+Read Raw matrix for preview 
+```{r}
+library(readr)
+library(readr)
+
+safe_read <- function(file) {
+  # First attempt: read as TSV
+  df <- tryCatch(
+    readr::read_tsv(file, show_col_types = FALSE),
+    error = function(e) NULL   # catch fatal errors
+  )
+  
+  # If read_tsv failed entirely:
+  if (is.null(df)) {
+    message("TSV read failed — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If read_tsv returned but with parsing issues:
+  probs <- problems(df)
+  if (nrow(probs) > 0) {
+    message("Parsing issues detected in TSV — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If everything was fine:
+  return(df)
+}
+
+x <- safe_read(files[1])
+
+
+kable_head(x[, 1:min(6, ncol(x))], 5, paste(gse,": raw table preview"))
+```
+
+Boxplots
+```{r}
+library(tidyverse)
+
+# suppose 'mat' is a gene x sample matrix (numeric)
+plot_box <- function(mat, main = "", ylab = "log2(counts+1)") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = sample, y = value)) +
+    geom_boxplot(outlier.size = 0.2) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    labs(title = main, x = "Sample", y = ylab)
+}
+
+plot_box(x[,2:ncol(x)])
+```
+Density Plot 
+```{r}
+plot_density <- function(mat, main = "") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = value, colour = sample)) +
+    geom_density() +
+    theme_bw() +
+    labs(title = main, x = "log2(counts+1)", y = "Density") +
+    guides(colour = "none")
+}
+
+plot_density(x[,2:ncol(x)])
+```
+
+Counts per million 
+```{r}
+library(edgeR)
+
+x_cpm <- cpm(y = x[,2:ncol(x)])
+
+plot_box(x_cpm,main = "CPM - all genes")
+plot_density(x_cpm,main = "CPM - all genes, NO design")
+
+to_remove <- edgeR::filterByExpr(x_cpm,min.count = 3)
+x_cpm_filtered <- x_cpm[to_remove,]
+
+plot_box(x_cpm_filtered,main = "CPM filtered out lowly expressed - \nNO design matrix")
+
+plot_density(x_cpm_filtered,main = "CPM filtered out lowly expressed - \n - NO design matrix")
+```
+Exercise 1
+
+```{r}
+library(readr)
+library(readr)
+
+safe_read <- function(file) {
+  # First attempt: read as TSV
+  df <- tryCatch(
+    readr::read_tsv(file, show_col_types = FALSE),
+    error = function(e) NULL   # catch fatal errors
+  )
+  
+  # If read_tsv failed entirely:
+  if (is.null(df)) {
+    message("TSV read failed — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If read_tsv returned but with parsing issues:
+  probs <- problems(df)
+  if (nrow(probs) > 0) {
+    message("Parsing issues detected in TSV — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If everything was fine:
+  return(df)
+}
+
+x <- safe_read(files[1])
+
+
+kable_head(x[, 1:min(6, ncol(x))], 5, paste(gse,": raw table preview"))
+```
+Bar plots 
+```{r}
+# suppose 'mat' is a gene x sample matrix (numeric)
+plot_box <- function(mat, main = "", ylab = "log2(counts+1)") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = sample, y = value)) +
+    geom_boxplot(outlier.size = 0.2) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    labs(title = main, x = "Sample", y = ylab)
+}
+
+plot_box(x[,2:ncol(x)])
+
+
+plot_density <- function(mat, main = "") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = value, colour = sample)) +
+    geom_density() +
+    theme_bw() +
+    labs(title = main, x = "log2(counts+1)", y = "Density") +
+    guides(colour = "none")
+}
+
+plot_density(x[,2:ncol(x)])
+
+```
+```{r}
+samples <- colnames(x)[2:length(colnames(x))]
+
+type <- gsub("[0-9]", "", samples)
+
+sample_data <- data.frame(samples, type)
+
+design <- model.matrix(~ 0 + type,data = sample_data)
+rownames(design) <- sample_data$samples
+colnames(design) <- paste0("type", levels(factor(type)))
+design
+
+group <- colnames(design)[max.col(design)]
+names(group) <- rownames(design)
+
+df_long <- as.data.frame(x[, 2:ncol(x)]) |>
+  mutate(gene = rownames(x)) |>
+  pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+  mutate(
+    value = log2(value + 1),
+    group = group[sample]
+  )
+
+ggplot(df_long, aes(x = sample, y = value, fill = group)) +
+  geom_boxplot(outlier.size = 0.2) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    title = "Raw counts distribution",
+    x = "Sample",
+    y = "log2(counts + 1)",
+    fill = "Design variable"
+  )
+
+group <- colnames(design)[max.col(design)]
+names(group) <- rownames(design)
+
+df_long <- as.data.frame(x[, 2:ncol(x)]) |>
+  mutate(gene = rownames(x)) |>
+  pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+  mutate(
+    value = log2(value + 1),
+    group = group[sample]
+  )
+
+ggplot(df_long, aes(x = value, group = sample, colour = group)) +
+  geom_density() +
+  theme_bw() +
+  labs(
+    title = "Raw counts density",
+    x = "log2(counts + 1)",
+    y = "Density",
+    colour = "Design variable"
+  )
+
+```
+filter
+```{r}
+counts <- as.matrix(x[, 2:ncol(x)])
+rownames(counts) <- x[[1]]
+
+keep <- rowSums(counts >= 10) >= 2
+counts_filt <- counts[keep, ]
+
+df_long_filt <- as.data.frame(counts_filt) |>
+  mutate(gene = rownames(counts_filt)) |>
+  pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+  mutate(
+    value = log2(value + 1),
+    group = group[sample]
+  )
+
+ggplot(df_long_filt, aes(x = sample, y = value, fill = group)) +
+  geom_boxplot(outlier.size = 0.2) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    title = "Filtered counts distribution",
+    x = "Sample",
+    y = "log2(counts + 1)",
+    fill = "Design variable"
+  )
+
+ggplot(df_long_filt, aes(x = value, colour = group)) +
+  geom_density() +
+  theme_bw() +
+  labs(
+    title = "Filtered counts density",
+    x = "log2(counts + 1)",
+    y = "Density",
+    colour = "Design variable"
+  )
+
+```
+
+Exercise 2
+
+```{r}
+library(readr)
+library(readr)
+
+gse <- "GSE122380"
+
+source("./supp_functions.R")
+fetch_geo_supp(gse = gse)
+
+path <- file.path("data", gse)
+files <- list.files(path, pattern = "\\.txt.gz$|\\.tsv.gz$|\\.csv.gz$", 
+                    full.names = TRUE, recursive = TRUE)
+
+
+safe_read <- function(file) {
+  # First attempt: read as TSV
+  df <- tryCatch(
+    readr::read_tsv(file, show_col_types = FALSE),
+    error = function(e) NULL   # catch fatal errors
+  )
+  
+  # If read_tsv failed entirely:
+  if (is.null(df)) {
+    message("TSV read failed — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If read_tsv returned but with parsing issues:
+  probs <- problems(df)
+  if (nrow(probs) > 0) {
+    message("Parsing issues detected in TSV — reading as space-delimited file instead.")
+    return(readr::read_table(file, show_col_types = FALSE))
+  }
+  
+  # If everything was fine:
+  return(df)
+}
+
+x <- safe_read(files[1])
+
+
+kable_head(x[, 1:min(6, ncol(x))], 5, paste(gse,": raw table preview"))
+```
+
+Design 
+```{r}
+
+#design matrix - 
+samples <- colnames(x)[2:ncol(x)]
+type <- unlist(lapply(samples,FUN = function(x){unlist(strsplit(x,split = "_"))[1]}))     
+sample_data <- data.frame(samples, type)
+
+
+design <- model.matrix(~ 0 + type,data = sample_data)
+rownames(design) <- sample_data$samples
+colnames(design) <- paste0("type", levels(factor(type)))
+design
+```
+
+```{r}
+# suppose 'mat' is a gene x sample matrix (numeric)
+plot_box <- function(mat, main = "", ylab = "log2(counts+1)") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = sample, y = value)) +
+    geom_boxplot(outlier.size = 0.2) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    labs(title = main, x = "Sample", y = ylab)
+}
+
+plot_box(x[,2:ncol(x)])
+
+
+plot_density <- function(mat, main = "") {
+  df <- as.data.frame(mat)
+  df_long <- df |>
+    mutate(gene = rownames(df)) |>
+    pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+    mutate(value = log2(value + 1))
+
+  ggplot(df_long, aes(x = value, colour = sample)) +
+    geom_density() +
+    theme_bw() +
+    labs(title = main, x = "log2(counts+1)", y = "Density") +
+    guides(colour = "none")
+}
+
+plot_density(x[,2:ncol(x)])
+
+```
+
+```{r}
+group <- colnames(design)[max.col(design)]
+names(group) <- rownames(design)
+
+df_long <- as.data.frame(x[, 2:ncol(x)]) |>
+  mutate(gene = rownames(x)) |>
+  pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+  mutate(
+    value = log2(value + 1),
+    group = group[sample]
+  )
+
+ggplot(df_long, aes(x = sample, y = value, fill = group)) +
+  geom_boxplot(outlier.size = 0.2) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    title = "Raw counts distribution",
+    x = "Sample",
+    y = "log2(counts + 1)",
+    fill = "Design variable"
+  )
+
+group <- colnames(design)[max.col(design)]
+names(group) <- rownames(design)
+
+df_long <- as.data.frame(x[, 2:ncol(x)]) |>
+  mutate(gene = rownames(x)) |>
+  pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+  mutate(
+    value = log2(value + 1),
+    group = group[sample]
+  )
+
+ggplot(df_long, aes(x = value, group = sample, colour = group)) +
+  geom_density() +
+  theme_bw() +
+  labs(
+    title = "Raw counts density",
+    x = "log2(counts + 1)",
+    y = "Density",
+    colour = "Design variable"
+  )
+```
+
+```{r}
+counts <- as.matrix(x[, 2:ncol(x)])
+rownames(counts) <- x[[1]]
+
+keep <- rowSums(counts >= 10) >= 2
+counts_filt <- counts[keep, ]
+
+df_long_filt <- as.data.frame(counts_filt) |>
+  mutate(gene = rownames(counts_filt)) |>
+  pivot_longer(-gene, names_to = "sample", values_to = "value") |>
+  mutate(
+    value = log2(value + 1),
+    group = group[sample]
+  )
+
+ggplot(df_long_filt, aes(x = sample, y = value, fill = group)) +
+  geom_boxplot(outlier.size = 0.2) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    title = "Filtered counts distribution",
+    x = "Sample",
+    y = "log2(counts + 1)",
+    fill = "Design variable"
+  )
+
+ggplot(df_long_filt, aes(x = value, colour = group)) +
+  geom_density() +
+  theme_bw() +
+  labs(
+    title = "Filtered counts density",
+    x = "log2(counts + 1)",
+    y = "Density",
+    colour = "Design variable"
+  )
+
+```
+
