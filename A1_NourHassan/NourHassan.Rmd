@@ -1,0 +1,793 @@
+---
+title: "BCB420 A1"
+author: "Nour Hassan (1009196479)"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide 
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    
+bibliography: references.bib
+link-citations: true
+csl: apa.csl
+nocite: '@*'
+---
+
+# Introduction 
+
+## Paper Overview
+
+I selected the bulk RNA-seq dataset (GEO accession: GSE298563) from a study investigating sinonasal squamous cell carcinoma (SNSCC): *Single-Nucleus Multi-Omics Reveals Hypoxia-Driven Angiogenic Programs and Their Epigenetic Control in Sinonasal Squamous Cell Carcinoma (GEO accession number: GSE298563)* [@you_sncc_2026]. Since SNSCC is a rare malignancy with poorly characterized molecular drivers, the researchers integrated bulk RNA-seq and single-nucleus sequencing to map its molecular landscape. Their analysis revealed that one malignant cell population, TC1, exploits a hypoxia-driven angiogenic program. To investigate the drivers of this program, the researchers cultured RPMI 2650 cells (a SNSCC cell line) under normoxic (21% O₂) or hypoxic (1% O₂) conditions for 24 hours.
+
+### Dataset Selection Reasoning
+
+My current BCB420 research project focuses on cancer genomics. While my project examines medulloblastoma rather than carcinoma, I wanted to continue exploring cancer genomics with a bulk RNA-seq dataset. This dataset was particularly suitable because it meets several key criteria: it uses bulk RNA-seq (recommended by Professor Isserlin), compares two well-defined conditions (normoxia vs. hypoxia), and includes six samples—small enough for my system to handle while maintaining three replicates per condition for statistical rigor.
+
+### Experimental layout 
+
+The control condition consists of tissue samples experiencing normal oxygen levels (normoxia), and the test condition consists of tissues with low oxygen levels (hypoxia). There are three normoxic control samples and three hypoxic test samples.
+
+
+# Downloading the dataset 
+
+The dataset is available on the Gene Expression Omnibus (GEO), which can be accessed through R using the GEOquery package [@geoquery_2007] and its accession number (GSE298563).
+
+```{r ,results='hide', message=FALSE, warning=FALSE}
+
+library(GEOquery)
+
+gse <- "GSE298563"
+
+##### code from the identifeir mapping lecture 4
+
+#create directory 
+dir.create("data", showWarnings = FALSE, recursive = TRUE) 
+
+# retrive supplementary files
+GEOquery::getGEOSuppFiles(GEO = gse, baseDir = "data", makeDirectory = TRUE)
+
+invisible(file.path("data", gse)) 
+```
+
+The raw counts matrix is then loaded as a table using read.table() [@baseR_2025] and genes with no expression across all samples are removed.
+
+```{r}
+counts <- read.table("data/GSE298563/GSE298563_raw_counts.txt.gz",
+                     header = TRUE)
+
+# Remove genes with zero counts in ALL samples
+keep_expressed <- rowSums(counts[, -1]) > 0
+counts_clean <- counts[keep_expressed, ]
+
+counts[1:10,]
+```
+**Table 1.** **Raw counts data preview.** First 10 rows of the counts table. The full dataset contains 28,256 genes (rows) and 6 samples (columns): three normoxic replicates (Normoxia1-3) and three hypoxic replicates (Hypoxia1-3). Gene symbols are in the first column.
+
+# Assessing the Data 
+
+The dataset's matrix consisted of the raw counts data and was assessed for its number of replicates, per sample library size, and sample correlation and clustering. 
+
+## Replicates 
+
+Each condition (normoxia and hypoxia) has three biological replicates, satisfying the minimum requirement for statistical analysis. All replicates were treated as independent samples in the differential expression analysis, which used a model that explicitly accounts for within-condition variability. To assess replicate consistency, I examined sample-level correlations and clustering patterns. Expression data were visualized at the individual replicate level rather than as condition averages to preserve biological variability.
+
+## Library Size 
+
+All samples demonstrated adequate sequencing depth, ranging from 60 to 77 million reads per sample (mean = 68.06M, SD = 9.1M) (refer to Figure 1). The overall coefficient of variation (CV) was 13.4%, indicating low variability and excellent library preparation quality. Within-condition variability was similarly low, with CVs of 13.0% for hypoxia and 15.3% for normoxia samples (Table 2).
+
+
+```{r library-sizes, warning=FALSE, message=FALSE}
+#### Bar plot of library size #####
+library(ggplot2)
+
+# calculate library sizes 
+library_sizes <- colSums(counts[, -1])
+
+#library size datframe 
+lib_size_df <- data.frame(
+  Sample = names(library_sizes),
+  LibrarySize_M = library_sizes / 1e6  # Convert to millions
+)
+
+# add condition 
+lib_size_df$Condition <- ifelse(grepl("Normoxia", lib_size_df$Sample, ignore.case = TRUE), 
+                            "Normoxia", "Hypoxia")
+
+
+# Calculate mean
+mean_lib <- mean(library_sizes)
+
+# plot
+ggplot(lib_size_df, aes(x = Sample, y = LibrarySize_M, fill = Condition)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = mean_lib / 1e6, 
+             linetype = "dashed", color = "black", linewidth = 1) +
+  scale_fill_manual(values = c("Normoxia" = "steelblue", 
+                                "Hypoxia" = "coral")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "top") +  
+  labs(title = "Library Sizes per Sample",
+       y = "Total Reads (Millions)",
+       x = "Sample",
+       fill = "Condition")  # Legend title
+
+
+```
+
+**Figure 1.** **Library sizes across samples**. Total reads (millions) per sample, colored by condition (orange = hypoxia, blue = normoxia). Dashed line indicates the overall mean library size.
+
+```{r warning=FALSE, results='hide'}
+# Calculate CV (Coefficient of Variation) across samples 
+library_sizes <- colSums(counts[, -1])
+mean_lib <- mean(library_sizes)
+sd_lib <- sd(library_sizes)
+cv_lib <- (sd_lib / mean_lib) * 100
+
+cat("Mean library size:", round(mean_lib / 1e6, 2), "M reads\n")
+cat("SD:", round(sd_lib / 1e6, 2), "M reads\n")
+cat("CV:", round(cv_lib, 1), "%\n")
+
+```
+
+```{r table_2, warning=FALSE, message=FALSE}
+# Within-condition stats
+
+library(dplyr)
+
+# Check within-condition variability
+lib_df <- data.frame(
+  Sample = names(library_sizes),
+  LibrarySize = library_sizes,
+  Condition = ifelse(grepl("Hypoxia", names(library_sizes)), 
+                     "Hypoxia", "Normoxia")
+)
+
+lib_df %>%
+  group_by(Condition) %>%
+  summarise(
+    `Mean in millions ` = mean(LibrarySize)/ 1e6,
+    `SD in millions` = sd(LibrarySize)/ 1e6,
+    `CV Percent` = (sd(LibrarySize) / mean(LibrarySize)) * 100
+  )
+```
+**Table 2.** The following tibble [@tib_2025] contains the mean, standard deviation, and coefficient of variation (as a percentage) across replicates within each condition
+
+
+## Sample Correlation and Clustering 
+
+Sample-to-sample Pearson correlations were consistently high across all samples (Figure 2). Within-condition correlations were similarly high, with mean correlations of 0.988 for hypoxia replicates and 0.989 for normoxia replicates. Between-condition correlations were slightly lower at 0.986. Hierarchical clustering analysis revealed clear separation between conditions, with all biological replicates clustering together by their respective treatment groups. These results demonstrate excellent replicate reproducibility and confirm that the observed variation is driven by the experimental treatment.
+
+```{r }
+library(pheatmap)
+library(RColorBrewer)
+
+
+log_counts <- log2(counts[, -1] + 1)
+cor_matrix <- cor(log_counts, method = "pearson")
+
+# Create condition annotation for the heatmap
+annotation_col <- data.frame(
+  Condition = ifelse(grepl("Hypoxia", colnames(log_counts)), 
+                     "Hypoxia", "Normoxia")
+)
+rownames(annotation_col) <- colnames(log_counts)
+
+# Define colors for conditions
+ann_colors <- list(
+  Condition = c(Hypoxia = "coral", Normoxia = "steelblue")
+)
+
+# Create correlation heatmap
+pheatmap(cor_matrix,
+         annotation_col = annotation_col,
+         annotation_row = annotation_col,
+         annotation_colors = ann_colors,
+         main = "Sample-to-Sample Correlation",
+         color = colorRampPalette(c("white", "red"))(100),
+         display_numbers = TRUE,
+         number_format = "%.3f",
+         fontsize = 10,
+         fontsize_number = 8,
+         border_color = "grey60")
+
+
+### Summary Stats ####
+
+# Within-condition correlations
+hypoxia_samples <- c("Hypoxia1", "Hypoxia2", "Hypoxia3")
+normoxia_samples <- c("Normoxia1", "Normoxia2", "Normoxia3")
+
+# Within Hypoxia
+hypoxia_cors <- c(
+  cor_matrix["Hypoxia1", "Hypoxia2"],
+  cor_matrix["Hypoxia1", "Hypoxia3"],
+  cor_matrix["Hypoxia2", "Hypoxia3"]
+)
+
+# Within Normoxia
+normoxia_cors <- c(
+  cor_matrix["Normoxia1", "Normoxia2"],
+  cor_matrix["Normoxia1", "Normoxia3"],
+  cor_matrix["Normoxia2", "Normoxia3"]
+)
+
+# Between conditions
+between_cors <- as.vector(cor_matrix[hypoxia_samples, normoxia_samples])
+
+cat("Within Hypoxia: mean =", round(mean(hypoxia_cors), 3), "\n")
+cat("Within Normoxia: mean =", round(mean(normoxia_cors), 3), "\n")
+cat("Between conditions: mean =", round(mean(between_cors), 3), "\n")
+```
+
+
+**Figure 2.** Sample correlation heatmap. Pearson correlations between all samples with hierarchical clustering dendrograms. Within-condition and between-condition mean correlations are reported below the heatmap. 
+
+# Identifier mapping
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+
+# to check number of unmapped genes 
+
+length(grep("^LOC", counts$Gene))
+```
+
+Most of the genes in the dataset were already mapped to their approropiate HGNC gene symbol. However,1631 are unmapped and are only represented by their NCBI identifiers. Therefore, identifier mapping was performed using the org.Hs.eg.db package [@ncbi_2025]. 
+
+```{r message=FALSE, warning=FALSE}
+#install package for ncbi identifier mapping if missing 
+if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+    BiocManager::install("org.Hs.eg.db")
+} 
+
+library(org.Hs.eg.db)
+
+counts_mapped <- counts
+
+# gene IDs (mixed LOC + HGNC)
+genes <- counts$Gene
+
+# Identify LOC IDs (start with LOC)
+loc_ids <- genes[grepl("^LOC", genes)]
+
+# Extract id
+entrez_ids <- sub("LOC", "", loc_ids)
+
+# Map LOC IDs to HGNC
+mapped_symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = entrez_ids,
+  column = "SYMBOL",
+  keytype = "ENTREZID",
+  multiVals = "first"
+)
+
+# Replace LOC IDs with mapped symbols where available
+new_gene_names <- genes
+for(i in seq_along(loc_ids)) {
+  if(!is.na(mapped_symbols[i])) {
+    new_gene_names[genes == loc_ids[i]] <- mapped_symbols[i]
+  }
+}
+
+counts_mapped$Gene <- new_gene_names
+
+counts_mapped[1:10,]
+```
+
+**Table 3. Mapped Raw counts data preview.** The first 10  rows of the mapped counts table are shown where some of the previously unmapped genes are mapped to their appropriate HGNC gene symbol. 
+
+```{r , results='hide', message=FALSE, warning=FALSE}
+
+remain_unmapped <- length(grep("^LOC", counts_mapped$Gene))
+
+new_mapped <- length(grep("^LOC", counts$Gene)) - length(grep("^LOC", counts_mapped$Gene))
+
+```
+This process enabled the mapping of 637 LOC identifiers to official HUGO gene symbols, while 994 genes remain unmapped due to the absence of corresponding entries in the org.Hs.eg.db annotation database. These unmapped genes were retained in the dataset as they may show differential expression between conditions.
+
+After mapping, the dataset was checked for duplicate gene symbols (multiple rows mapping to the same gene). No duplicates were found, confirming that each gene identifier mapped to a unique HUGO symbol. If duplicates had been present, expression values would have been averaged across all rows sharing the same gene symbol to create a single consensus measurement per gene.
+
+
+
+```{r}
+# Check if mapping created duplicates
+gene_counts <- table(counts_mapped$Gene)
+duplicates <- names(gene_counts[gene_counts > 1])
+
+cat("\n=== Duplicate Genes After Mapping ===\n")
+cat("Number of genes with duplicates:", length(duplicates), "\n")
+
+if(length(duplicates) > 0) {
+  cat("\nExample duplicates:\n")
+  print(head(duplicates, 10))
+}
+```
+
+
+# Normalization 
+
+The data compares the same cell type under different conditions. Sample-to-sample correlations are high (>0.98), and as seen in the boxplot and density plot visualizations (Figures 3 and 4), the distributions across samples are highly comparable. Therefore, the Trimmed Mean of M-values (TMM) normalization method was selected due to its underlying assumption that most genes are not differentially expressed [@robinson_scaling_2010].
+
+```{r}
+# Prenormalized visualization (box plot)
+#code from lecture 5 normalization 
+
+ 
+
+library(reshape2)
+library(ggplot2)
+
+# Extract count matrix (excluding Gene column)
+count_matrix <- as.matrix(counts_mapped[, -1])
+rownames(count_matrix) <- counts_mapped$Gene
+
+# Log2 transform
+log2_counts <- log2(count_matrix + 1)
+
+# Convert to long format
+df_long <- melt(log2_counts)
+colnames(df_long) <- c("gene", "sample", "value")
+
+# Add condition
+df_long$Condition <- ifelse(grepl("Hypoxia", df_long$sample), 
+                            "Hypoxia", "Normoxia")
+
+# Create boxplot
+ggplot(df_long, aes(x = sample, y = value, fill = Condition)) +
+  geom_boxplot(outlier.size = 0.2) +
+  scale_fill_manual(values = c("Normoxia" = "steelblue", 
+                                "Hypoxia" = "coral")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    legend.position = "top"
+  ) +
+  labs(
+    title = "Distribution of Gene Expression (Raw Counts)",
+    x = "Sample",
+    y = "log2(Count + 1)",
+    fill = "Condition"
+  )
+```
+
+**Figure 3. Distribution of gene expression levels per sample.** Box plots show the distribution of log-transformed counts for each sample, colored by condition (orange = hypoxia, blue = normoxia).
+
+
+
+```{r}
+
+#generate density plot 
+ggplot(df_long, aes(x = value, color = sample)) +
+  geom_density(linewidth = 1) +
+  scale_color_manual(values = c(
+    "Normoxia1" = "#2E86AB", 
+    "Normoxia2" = "#5DADE2", 
+    "Normoxia3" = "#85C1E9",
+    "Hypoxia1" = "#E63946", 
+    "Hypoxia2" = "#F07167", 
+    "Hypoxia3" = "#F4A1A8"
+  )) +
+  theme_bw() +
+  theme(legend.position = "right") +
+  labs(
+    title = "Density Distribution of Gene Expression (Raw Counts)",
+    x = "log2(Count + 1)",
+    y = "Density",
+    color = "Sample"
+  )
+```
+
+**Figure 4. Distribution of gene expression levels per sample.** Density plots show the distribution of log-transformed counts for each sample, colored by sample.
+
+## Low expression filtering
+First Lowly expressed genes will be removed using edgeR's filterbyExpr function [@edgeR_2025] using a design matrix denoting normoxia versus hypoxia.
+```{r}
+#design matrix 
+samples <- colnames(counts_mapped)[2:ncol(counts_mapped)]
+conditions <- gsub("[0-9]", "", samples)   #extract condition names with out replicate number
+
+sample_data <- data.frame(samples = samples, conditions = conditions)
+
+design <- model.matrix(~ 0 + conditions ,data = sample_data)
+rownames(design) <- sample_data$samples
+colnames(design) <- unique(conditions)
+
+#filtering low expression 
+count_mat <- as.matrix(counts_mapped[2:ncol(counts_mapped)])
+keep <- edgeR::filterByExpr(
+  y = count_mat,
+  min.count = 3,
+  design = design
+)
+
+counts_filtered_withdesign <-counts_mapped[keep,]
+
+# Extract count matrix (excluding Gene column)
+count_matrix <- as.matrix(counts_filtered_withdesign[, -1])
+rownames(count_matrix) <- counts_filtered_withdesign$Gene
+
+# Log2 transform
+log2_counts <- log2(count_matrix + 1)
+
+# Convert to long format
+df_long <- melt(log2_counts)
+colnames(df_long) <- c("gene", "sample", "value")
+
+# Add condition
+df_long$Condition <- ifelse(grepl("Hypoxia", df_long$sample), 
+                            "Hypoxia", "Normoxia")
+
+# Create boxplot
+ggplot(df_long, aes(x = sample, y = value, fill = Condition)) +
+  geom_boxplot(outlier.size = 0.2) +
+  scale_fill_manual(values = c("Normoxia" = "steelblue", 
+                                "Hypoxia" = "coral")) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    legend.position = "top"
+  ) +
+  labs(
+    title = "Distribution of Gene Expression (Low expression filtered)",
+    x = "Sample",
+    y = "log2(Count + 1)",
+    fill = "Condition"
+  )
+```
+
+**Figure 5. Distribution of gene expression levels post-filtering.** Box plots show the distribution of log-transformed counts post-filtering for each sample, colored by condition (orange = hypoxia, blue = normoxia).
+
+
+```{r}
+#generate density plot 
+ggplot(df_long, aes(x = value, color = sample)) +
+  geom_density(linewidth = 1) +
+  scale_color_manual(values = c(
+    "Normoxia1" = "#2E86AB", 
+    "Normoxia2" = "#5DADE2", 
+    "Normoxia3" = "#85C1E9",
+    "Hypoxia1" = "#E63946", 
+    "Hypoxia2" = "#F07167", 
+    "Hypoxia3" = "#F4A1A8"
+  )) +
+  theme_bw() +
+  theme(legend.position = "right") +
+  labs(
+    title = "Density Distribution of Gene Expression (Low expression filtered)",
+    x = "log2(Count + 1)",
+    y = "Density",
+    color = "Sample"
+  )
+```
+
+**Figure 6. Distribution of gene expression levels  post-filtering per sample.** Density plots show the distribution of log-transformed counts post-filtering for each sample, colored by sample.
+
+## TMM normalization 
+After filtering, TMM is normalization is performed using the edgeR pacakge [@edgeR_2025].
+```{r}
+library(edgeR)
+
+count_matrix <- as.matrix(counts_filtered_withdesign[, -1])
+rownames(count_matrix) <- counts_filtered_withdesign$Gene
+
+group <- factor(sample_data$conditions)
+
+dge <- edgeR::DGEList(
+  counts = count_matrix,
+  group = group
+)
+
+dge <- edgeR::calcNormFactors(dge, method = "TMM")
+
+logCPM_counts <- edgeR::cpm(dge, log = TRUE, prior.count = 1)
+
+
+```
+
+
+```{r}
+#Bar plot
+
+df_long <- reshape2::melt(logCPM_counts)
+colnames(df_long) <- c("gene", "sample", "value")
+
+df_long$Condition <- ifelse(grepl("Hypoxia", df_long$sample),
+                            "Hypoxia", "Normoxia")
+ggplot(df_long, aes(x = sample, y = value, fill = Condition)) +
+  geom_boxplot(outlier.size = 0.2) +
+  scale_fill_manual(values = c(
+    "Normoxia" = "steelblue",
+    "Hypoxia"  = "coral"
+  )) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    legend.position = "top"
+  ) +
+  labs(
+    title = "Distribution of Gene Expression (TMM-normalized)",
+    x = "Sample",
+    y = "log2 CPM",
+    fill = "Condition"
+  )
+
+```
+
+**Figure 7. Distribution of TMM-normalized gene expression.** Box plots show the distribution of TMM-normalized, log-transformed counts for each sample, colored by condition (orange = hypoxia, blue = normoxia).
+
+
+```{r}
+#generate density plot 
+ggplot(df_long, aes(x = value, color = sample)) +
+  geom_density(linewidth = 1) +
+  scale_color_manual(values = c(
+    "Normoxia1" = "#2E86AB", 
+    "Normoxia2" = "#5DADE2", 
+    "Normoxia3" = "#85C1E9",
+    "Hypoxia1" = "#E63946", 
+    "Hypoxia2" = "#F07167", 
+    "Hypoxia3" = "#F4A1A8"
+  )) +
+  theme_bw() +
+  theme(legend.position = "right") +
+  labs(
+    title = "Density Distribution of Gene Expression (TMM normalization)",
+    x = "log2 CPM",
+    y = "Density",
+    color = "Sample"
+  )
+
+
+```
+
+**Figure 8. Distribution of TMM-normalized gene expression.** Density plots show the distribution of TMM-normalized, log-transformed counts for each sample, colored by condition (orange = hypoxia, blue = normoxia). 
+
+## Multidimensional scaling analysis
+Multidimensional scaling analysis of TMM-normalized expression values showed clear separation of samples by oxygen condition, with tight clustering of biological replicates and no obvious outliers, similar to the original paper were no outliers were reported or removed [@you_sncc_2026] (refer to Figure 9).
+```{r}
+#plot mds 
+mds <- plotMDS(dge, plot = FALSE) #edgeR function
+
+
+mds_df <- data.frame(
+  Sample = colnames(dge),
+  Dim1 = mds$x,
+  Dim2 = mds$y,
+  Condition = factor(sample_data$conditions, 
+                     levels = c("Normoxia", "Hypoxia"))
+)
+
+
+ggplot(mds_df, aes(x = Dim1, y = Dim2, color = Condition)) +
+  geom_point(size = 4) +
+  scale_color_manual(values = c(
+    "Normoxia" = "steelblue",
+    "Hypoxia"  = "coral"
+  )) +
+  theme_bw() +
+  labs(
+    title = "MDS plot of samples (TMM-normalized)",
+    x = "Dimension 1",
+    y = "Dimension 2",
+    color = "Condition"
+  )
+
+
+
+
+```
+
+**Figure 9 Multidimensional scaling (MDS) plot of gene expression profiles.** Each point represents a sample, positioned based on the similarity of its expression profile to other samples. Samples are colored according to experimental condition (Hypoxia vs. Normoxia). The plot illustrates the overall variance in the dataset and highlights the clustering of samples by condition
+
+# Differntial Expression Analysis 
+
+The dataset has a conservative number of replicates per condition (3) so its statistical power is low which means it can benefit from a more conservative method such as DEseq2 [@deseq_2014]. 
+
+For differential expression analysis, raw count data were analyzed using DESeq2, which applies its own internal normalization based on median-of-ratios size factors  [@deseq_2014]. Previously applied TMM normalization was used exclusively for quality control and exploratory analyses.
+
+Differential expression analysis was performed using DESeq2 with a Wald test. Size factor normalization was applied using the median-of-ratios method, and p-values were adjusted for multiple testing using the Benjamini–Hochberg false discovery rate.
+
+## Pvalue calculation 
+
+Differential expression analysis was performed using DESeq2, which models raw RNA-seq counts using a negative binomial generalized linear model  [@deseq_2014]. For each gene, DESeq2 tests whether the log2 fold change between hypoxia and normoxia is significantly different from zero using a Wald test, producing a p-value per gene.
+
+```{r warning=FALSE, message=FALSE}
+library(DESeq2)
+
+
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix,          # raw counts (genes x samples)
+  colData   = sample_data,           # sample metadata
+  design    = ~ conditions,           # experimental design
+  tidy      = FALSE                  # counts are NOT in tidy format
+)
+
+dds <- DESeq(
+  dds,
+  test              = "Wald",         # Wald test for differential expression
+  fitType           = "parametric",   # parametric dispersion trend fit
+  betaPrior         = FALSE,          # no LFC shrinkage during model fitting
+  sfType            = "ratio",        # median-of-ratios size factor estimation
+  minReplicatesForReplace = 7,        # default outlier replacement threshold
+  useT              = FALSE,          # normal approximation for Wald test
+  quiet             = FALSE           # print progress messages
+)
+
+res <- results(
+  dds,
+  contrast          = c("conditions", "Hypoxia", "Normoxia"),
+  alpha             = 0.05,           # FDR threshold used for padj
+  pAdjustMethod     = "BH",            # Benjamini–Hochberg correction
+  independentFiltering = TRUE,         # filter low-information genes
+  cooksCutoff       = TRUE,            # filter genes with extreme outliers
+  tidy              = FALSE
+)
+
+```
+## Multiple hypothesis testing correction
+
+P-values were corrected using the Benjamini–Hochberg (BH) false discovery rate (FDR) method, which is DESeq2’s default. RNA-seq tests thousands of genes simultaneously and BH provides a good balance between statistical power and false positive control and is the industry standard. 
+
+```{r results='hide'}
+sum(res$padj < 0.05, na.rm = TRUE)
+
+```
+6088 genes passed multiple testing correction (FDR < 0.05).
+
+## Significance thresholds and number of DE genes
+
+The  following thresholds were implemented FDR < 0.05 and |log2FC| ≥ 1 . FDR < 0.05 controls the expected proportion of false positives at 5%, which is standard for high-dimensional genomic data. |log2FC| ≥ 1 ensures that detected changes are not only statistically significant but also biologically meaningful (≥2-fold change).
+
+```{r results='hide'}
+res_tbl <- as.data.frame(res)
+sig_res <- res_tbl %>%
+  filter(!is.na(padj)) %>%
+  filter(padj < 0.05, abs(log2FoldChange) >= 1)
+
+nrow(sig_res)
+```
+
+498 genes were significantly differentially expressed between hypoxia and normoxia using these criteria.
+
+## MA plot visualization
+
+```{r}
+## MA Plot
+# Prepare data - REMOVE NAs
+res_tbl <- as.data.frame(res)
+
+# Removed NA rows (genes DEseq2 filtered out due to low expression )
+res_tbl <- res_tbl[!is.na(res_tbl$padj), ]  
+
+# Define significance
+res_tbl$sig <- ifelse(res_tbl$padj < 0.05 & abs(res_tbl$log2FoldChange) >= 1,
+                      "Significant (FDR < 0.05, |log2FC| ≥ 1)", 
+                      "Not Significant")
+
+# Create MA plot
+ggplot(res_tbl, aes(x = log10(baseMean), y = log2FoldChange, color = sig)) +
+  geom_point(alpha = 0.5, size = 1) +
+  scale_color_manual(values = c("Significant (FDR < 0.05, |log2FC| ≥ 1)" = "red", 
+                                "Not Significant" = "grey70")) +
+  geom_hline(yintercept = c(-1, 1), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = 0, linetype = "solid", color = "blue", linewidth = 0.5) +
+  theme_bw() +
+  labs(
+    title = "MA Plot of Differential Expression",
+    x = "log10(Mean Expression)",
+    y = "log2 Fold Change (Hypoxia vs Normoxia)",
+    color = "Significance"
+  ) +
+  theme(legend.position = "top")
+```
+
+**Figure 10. MA plot of differential gene expression.** Each point represents a gene. The x-axis shows mean expression level (log10 scale), and the y-axis shows log2 fold change between hypoxia and normoxia. Red points indicate significantly differentially expressed genes (FDR < 0.05, |log2FC| ≥ 1). Dashed lines mark the fold-change thresholds (±1).
+
+## Top 20 Gene visualization 
+
+Top 20 differentially expressed genes (padj < 0.05, |log2FC| > 1) based on variance-stabilized expression values, showed clear separation between hypoxia and normoxia samples (refer to Figure 11).
+```{r}
+
+sig_res$gene <- rownames(sig_res)
+top_genes <- sig_res %>%
+  arrange(padj) %>% #sort
+  slice_head(n = 20) %>%
+  pull(gene)                    #pull top 20 gene names                
+
+vsd <- vst(dds, blind = FALSE) # variance stabilized values
+mat <- assay(vsd)[top_genes, ]
+
+mat <- mat - rowMeans(mat) #centre means 
+
+annotation_col <- data.frame(
+  Condition = factor(c(
+    "Normoxia","Normoxia","Normoxia",
+    "Hypoxia","Hypoxia","Hypoxia"
+  ))
+)
+rownames(annotation_col) <- colnames(mat)
+
+annotation_colors <- list(
+  Condition = c(
+    Normoxia = "steelblue",
+    Hypoxia  = "coral"
+  )
+)
+
+heat_colors <- colorRampPalette(c("blue", "white", "red"))(100)
+
+pheatmap::pheatmap(
+  mat,
+  scale = "none",
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = TRUE,
+  fontsize_row = 9,
+  annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
+  color = heat_colors,
+  main = "Top 20  Differentially Expressed Genes"
+)
+
+
+ 
+```
+
+**Figure 11** Heatmap of the top 20 differentially expressed genes (padj < 0.05, |log2FC| > 1) based on variance-stabilized expression values, showing clear separation between hypoxia and normoxia samples.
+
+# Final Coverage
+The final dataset contains 19,690 genes (after filtering from 28,256 initial genes), with three biological replicates per condition achieving a mean sequencing depth of 68.05M reads per sample. Differential expression analysis identified 6,088 genes at FDR < 0.05, with 498 genes meeting stringent criteria (FDR < 0.05, |log2FC| ≥ 1).
+
+```{r}
+cat("Genes before filtering:", nrow(counts_mapped), "\n")
+cat("Genes after filtering:", nrow(counts_filtered_withdesign), "\n")
+cat("Genes removed:", nrow(counts_mapped) - nrow(counts_filtered_withdesign), "\n")
+cat("Coverage:", mean(dge$samples$lib.size)/1e6)
+
+final_normalized <- reshape2::melt(dge)[,1:3]
+colnames(final_normalized) <- c("gene", "sample", "counts")
+
+# Downloading final Normalized dataset
+#saveRDS(final_normalized, file = "TMM-normalized-dataset.rds")
+```
+
+# Assignment Questions 
+
+1. Why is the dataset of interest to you?
+
+  A: [Dataset Selection Reasoning](#dataset-selection-reasoning)
+
+2. What are the control and test conditions of the dataset?
+
+  A: [Experimental Layout](#experimental-layout)
+
+3. How many samples in each of the conditions of your dataset?
+
+  A: [Experimental Layout](#experimental-layout)
+
+4. Were there expression values that were not unique for specific genes? How did you handle these?
+
+  A: [Idenitifier mapping](#identifier-mapping)
+
+
+5. Were there expression values that could not be mapped to current HUGO symbols?
+
+  A: [Identifier mapping](#identifier-mapping)
+
+6. Were there any outliers in your dataset? How were they handled in the originating paper? How many outliers were removed?
+
+  A: [Multidimensional scaling analysis](#multidimensional-scaling-analysis)
+
+
+7. How did you handle replicates?
+
+  A: [Replicates](#replicates) 
+
+8. What is the final coverage of your dataset?
+
+  A: [Final Coverage](#final-coverage)
+
+# References
