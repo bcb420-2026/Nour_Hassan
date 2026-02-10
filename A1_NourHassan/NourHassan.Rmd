@@ -582,7 +582,7 @@ ggplot(mds_df, aes(x = Dim1, y = Dim2, color = Condition)) +
 
 **Figure 9 Multidimensional scaling (MDS) plot of gene expression profiles.** Each point represents a sample, positioned based on the similarity of its expression profile to other samples. Samples are colored according to experimental condition (Hypoxia vs. Normoxia). The plot illustrates the overall variance in the dataset and highlights the clustering of samples by condition
 
-# Differntial Expression Analysis 
+# Differential Expression Analysis 
 
 The dataset has a conservative number of replicates per condition (3) so its statistical power is low which means it can benefit from a more conservative method such as DEseq2 [@deseq_2014]. 
 
@@ -824,5 +824,9 @@ colnames(final_normalized) <- c("gene", "sample", "counts")
 8. What is the final coverage of your dataset?
 
   A: [Final Coverage](#final-coverage)
+  
+# Link to Journal Entry 
+
+The link to the Journal Entry can be found [here](https://github.com/bcb420-2026/Nour_Hassan/wiki/A1:--Dataset-selection-and-Expression-analysis)
 
 # References
