@@ -655,36 +655,71 @@ nrow(sig_res)
 ## MA plot visualization
 
 ```{r}
-## MA Plot
-# Prepare data - REMOVE NAs
-res_tbl <- as.data.frame(res)
+library(dplyr)
+library(ggrepel)
+library(tibble)
 
-# Removed NA rows (genes DEseq2 filtered out due to low expression )
-res_tbl <- res_tbl[!is.na(res_tbl$padj), ]  
+res_tbl <- as.data.frame(res) %>%
+  rownames_to_column(var = "gene") %>%
+  filter(!is.na(padj))
 
-# Define significance
-res_tbl$sig <- ifelse(res_tbl$padj < 0.05 & abs(res_tbl$log2FoldChange) >= 1,
-                      "Significant (FDR < 0.05, |log2FC| ≥ 1)", 
-                      "Not Significant")
+# Define regulation direction
+res_tbl <- res_tbl %>%
+  mutate(
+    regulation = case_when(
+      padj < 0.05 & log2FoldChange >= 1  ~ "Upregulated",
+      padj < 0.05 & log2FoldChange <= -1 ~ "Downregulated",
+      TRUE                              ~ "Not significant"
+    )
+  )
 
-# Create MA plot
-ggplot(res_tbl, aes(x = log10(baseMean), y = log2FoldChange, color = sig)) +
-  geom_point(alpha = 0.5, size = 1) +
-  scale_color_manual(values = c("Significant (FDR < 0.05, |log2FC| ≥ 1)" = "red", 
-                                "Not Significant" = "grey70")) +
-  geom_hline(yintercept = c(-1, 1), linetype = "dashed", color = "black") +
-  geom_hline(yintercept = 0, linetype = "solid", color = "blue", linewidth = 0.5) +
+# Select top 10 significant genes by adjusted p-value
+top10 <- res_tbl %>%
+  filter(regulation != "Not significant") %>%
+  arrange(padj) %>%
+  slice_head(n = 10)
+
+ggplot(res_tbl, aes(x = log10(baseMean), y = log2FoldChange)) +
+  geom_point(aes(color = regulation),
+             alpha = 0.5, size = 1) +
+  
+  # Label top 10 genes
+  geom_text_repel(
+    data = top10,
+    aes(label = gene),
+    size = 3,
+    max.overlaps = Inf,
+    box.padding = 0.4,
+    point.padding = 0.3
+  ) +
+  
+  # Fold-change thresholds
+  geom_hline(yintercept = c(-1, 1),
+             linetype = "dashed", color = "black") +
+  geom_hline(yintercept = 0,
+             linetype = "solid", color = "grey40") +
+  
+  # Colors
+  scale_color_manual(
+    values = c(
+      "Upregulated"     = "#D62728",  # red
+      "Downregulated"   = "#1F77B4",  # blue
+      "Not significant" = "grey70"
+    )
+  ) +
+  
   theme_bw() +
   labs(
     title = "MA Plot of Differential Expression",
     x = "log10(Mean Expression)",
     y = "log2 Fold Change (Hypoxia vs Normoxia)",
-    color = "Significance"
+    color = "Regulation"
   ) +
   theme(legend.position = "top")
+
 ```
 
-**Figure 10. MA plot of differential gene expression.** Each point represents a gene. The x-axis shows mean expression level (log10 scale), and the y-axis shows log2 fold change between hypoxia and normoxia. Red points indicate significantly differentially expressed genes (FDR < 0.05, |log2FC| ≥ 1). Dashed lines mark the fold-change thresholds (±1).
+**Figure 10. MA plot of differential gene expression.** Each point represents a gene, plotted by mean expression (log10 scale) and log2 fold change. Genes significantly upregulated under hypoxia (FDR < 0.05, |log2FC| ≥ 1) are shown in red, downregulated genes in blue, and non-significant genes in grey. The top 10 most significant genes are labeled.
 
 ## Top 20 Gene visualization 
 
