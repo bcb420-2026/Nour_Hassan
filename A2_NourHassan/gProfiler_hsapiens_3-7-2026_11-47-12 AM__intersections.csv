@@ -1,0 +1,5 @@
+"source","term_name","term_id","highlighted","adjusted_p_value","negative_log10_of_adjusted_p_value","term_size","query_size","intersection_size","effective_domain_size","intersections"
+"GO:MF","monoatomic cation transmembrane transporter activity","GO:0008324","true","0.03612594412611485","1.4421807941065667","687","47","9","17454","CACNA1A,SLC6A13,KCNJ10,UCP2,TMC2,KCNV2,CHRNA10,SLC4A11,RYR3"
+"GO:MF","monoatomic cation channel activity","GO:0005261","false","0.04509181171202281","1.3459023151319387","404","47","7","17454","CACNA1A,KCNJ10,TMC2,KCNV2,CHRNA10,SLC4A11,RYR3"
+"GO:BP","metal ion transport","GO:0030001","true","0.00761180850779792","2.118512145904299","683","41","10","16268","CACNA1A,SLC6A13,KCNJ10,UCP2,KCNV2,HTR2B,SLC5A4,SLC4A11,RYR3,GRAMD2A"
+"GO:BP","monoatomic cation transport","GO:0006812","false","0.01692047376147548","1.7715874811838714","748","41","10","16268","CACNA1A,SLC6A13,KCNJ10,UCP2,KCNV2,HTR2B,SLC5A4,SLC4A11,RYR3,GRAMD2A"
